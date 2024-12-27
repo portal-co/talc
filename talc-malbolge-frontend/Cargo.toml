@@ -1,0 +1,11 @@
+[package]
+name = "talc-malbolge-frontend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arena-traits.workspace = true
+cfg-traits.workspace = true
+id-arena.workspace = true
+ssa-impls.workspace = true
+ssa-traits.workspace = true

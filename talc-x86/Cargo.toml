@@ -1,0 +1,11 @@
+[package]
+name = "talc-x86"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+iced-x86 = "1.21.0"
+paste = "1.0.15"
+portal-pc-waffle.workspace = true
+talc-common = { version = "0.1.0", path = "../talc-common" }
+waffle-ast.workspace = true

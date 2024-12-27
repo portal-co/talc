@@ -1,0 +1,10 @@
+[package]
+name = "talc-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+paste = "1.0.15"
+portal-pc-waffle.workspace = true
+typenum = { version = "1.17.0", features = ["const-generics"] }
+waffle-ast.workspace = true

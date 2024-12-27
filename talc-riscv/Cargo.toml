@@ -1,0 +1,11 @@
+[package]
+name = "talc-riscv"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+paste = "1.0.15"
+portal-pc-waffle.workspace = true
+riscv-decode = "0.2.2"
+talc-common = { version = "0.1.0", path = "../talc-common" }
+waffle-ast.workspace = true
