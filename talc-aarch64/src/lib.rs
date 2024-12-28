@@ -51,25 +51,29 @@ pub struct AArch64 {}
 impl Arch for AArch64 {
     type Regs = Regs;
 
-    fn go<C: Cfg>(
+    fn go<C: Cfg, H: Hook<Regs>>(
         f: &mut FunctionBody,
         entry: Block,
         code: &[u8],
         root_pc: u64,
         funcs: &Funcs,
         module: &mut Module,
+        hook: &mut H,
     ) -> ArchRes {
-        crate::go::<C>(f, entry, code, root_pc, funcs, module)
+        crate::go::<C, H>(f, entry, code, root_pc, funcs, module, hook)
     }
 }
-pub fn go<C: Cfg>(
+pub fn go<C: Cfg, H: Hook<Regs>>(
     f: &mut FunctionBody,
     entry: Block,
     code: &[u8],
     root_pc: u64,
     funcs: &Funcs,
     module: &mut Module,
+    hook: &mut H,
 ) -> ArchRes {
+    let code = hook.update_code::<C>(code);
+    let code = code.as_ref();
     let mut w = code
         .windows(4)
         .map(|w| u32::from_ne_bytes(w.try_into().unwrap()))
@@ -94,7 +98,7 @@ pub fn go<C: Cfg>(
         let mut k = f.add_block();
         let (idx, a) = w.next().unwrap();
         if let Some(i) = disarm64::decoder_full::decode(a) {
-            k = process::<C>(
+            k = process::<C, H>(
                 f,
                 &i,
                 &mut r,
@@ -104,6 +108,9 @@ pub fn go<C: Cfg>(
                 entry,
                 funcs,
                 module,
+                hook,
+                code,
+                root_pc,
             );
         }
         v.push((k, r));
@@ -111,7 +118,7 @@ pub fn go<C: Cfg>(
     for (idx, a) in w {
         let (k, mut regs) = v[idx - 4].clone();
         let k = match disarm64::decoder_full::decode(a) {
-            Some(i) => process::<C>(
+            Some(i) => process::<C, H>(
                 f,
                 &i,
                 &mut regs,
@@ -121,6 +128,9 @@ pub fn go<C: Cfg>(
                 entry,
                 funcs,
                 module,
+                hook,
+                code,
+                root_pc,
             ),
             None => f.add_block(),
         };
@@ -183,7 +193,7 @@ pub fn go<C: Cfg>(
         shim,
     };
 }
-pub fn process<C: Cfg>(
+pub fn process<C: Cfg, H: Hook<Regs>>(
     f: &mut FunctionBody,
     i: &Opcode,
     regs: &mut Regs,
@@ -193,6 +203,9 @@ pub fn process<C: Cfg>(
     entry: Block,
     funcs: &Funcs,
     module: &mut Module,
+    hook: &mut H,
+    code: &[u8],
+    root_pc: u64,
 ) -> Block {
     let new = f.add_block();
     let mut t = BlockTarget {
@@ -207,8 +220,17 @@ pub fn process<C: Cfg>(
         f.set_terminator(k, waffle::Terminator::Br { target: t });
     }
     // return new;
-    let k = new;
-
+    let mut k = new;
+    k = hook.hook::<C>(
+        f,
+        k,
+        regs,
+        pc,
+        funcs,
+        module,
+        code,
+        pc.wrapping_sub(root_pc).try_into().unwrap(),
+    );
     match (&i.mnemonic, &i.operation) {
         //Fallback
         i => {

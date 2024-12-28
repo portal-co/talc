@@ -1,36 +1,38 @@
-use talc_common::{Arch, Cfg, Funcs, TRegs};
+use talc_common::{Arch, Cfg, Funcs, Hook, TRegs};
 use typenum::Same;
 use waffle::{Block, FunctionBody, Module};
 
 pub trait Felf: Arch {
-    fn felf1<C: Cfg>(
+    fn felf1<C: Cfg, H: Hook<Self::Regs>>(
         f: &mut FunctionBody,
         entry: Block,
         mut code: &[u8],
         funcs: &Funcs,
         module: &mut Module,
+        hook: &mut H,
     ) -> Option<Block> {
         code = code.strip_prefix(b"FELF0001")?;
         let base;
         (base, code) = code.split_at_checked(16)?;
         let entry2 = u64::from_le_bytes(base[..8].try_into().unwrap());
         let base = u64::from_le_bytes(base[8..].try_into().unwrap());
-        let v = Self::go::<C>(f, entry, code, base, funcs, module);
+        let v = Self::go::<C, H>(f, entry, code, base, funcs, module, hook);
         return v.insts.get(&entry2).cloned();
     }
-    fn felf2<C: Cfg>(
+    fn felf2<C: Cfg, H: Hook<Self::Regs>>(
         f: &mut FunctionBody,
         entry: Block,
         mut code: &[u8],
         funcs: &Funcs,
         module: &mut Module,
+        hook: &mut H,
     ) -> Option<Block> {
         code = code.strip_prefix(b"FELF0002")?;
         let base;
         (base, code) = code.split_at_checked(16)?;
         let entry2 = u64::from_le_bytes(base[..8].try_into().unwrap());
         let base = u64::from_le_bytes(base[8..].try_into().unwrap());
-        let v = Self::go::<C>(f, entry, code, base, funcs, module);
+        let v = Self::go::<C, H>(f, entry, code, base, funcs, module, hook);
         return v.insts.get(&entry2).cloned();
     }
 }
@@ -85,6 +87,4 @@ pub trait FelfFuncs: Same<Output = Funcs> + Sized {
         ));
     }
 }
-impl FelfFuncs for Funcs{
-
-}
+impl FelfFuncs for Funcs {}

@@ -414,32 +414,36 @@ pub struct R5 {}
 impl Arch for R5 {
     type Regs = Regs;
 
-    fn go<C: Cfg>(
+    fn go<C: Cfg, H: Hook<Self::Regs>>(
         f: &mut FunctionBody,
         entry: Block,
         code: &[u8],
         root_pc: u64,
         funcs: &Funcs,
         module: &mut Module,
+        hook: &mut H,
     ) -> ArchRes {
-        crate::go::<C>(f, entry, code, root_pc, funcs, module)
+        crate::go::<C, H>(f, entry, code, root_pc, funcs, module, hook)
     }
 }
-pub fn go<C: Cfg>(
+pub fn go<C: Cfg, H: Hook<Regs>>(
     f: &mut FunctionBody,
     entry: Block,
     code: &[u8],
     root_pc: u64,
     funcs: &Funcs,
     module: &mut Module,
+    hook: &mut H,
 ) -> ArchRes {
+    let code = hook.update_code::<C>(code);
+    let code = code.as_ref();
     let mut w = code
         .windows(4)
         .map(|w| u32::from_ne_bytes(w.try_into().unwrap()))
         .enumerate();
     let shim = f.add_block();
     let mut v = vec![];
-    for _ in 0..4 {
+    for i in 0..4 {
         let mut r = Regs {
             regs: f.blocks[entry].params[..31]
                 .iter()
@@ -455,9 +459,10 @@ pub fn go<C: Cfg>(
                 .unwrap(),
         };
         let mut k = f.add_block();
+
         let (idx, a) = w.next().unwrap();
         if let Ok(i) = riscv_decode::decode(a) {
-            k = process::<C>(
+            k = process::<C, H>(
                 f,
                 &i,
                 &mut r,
@@ -469,14 +474,16 @@ pub fn go<C: Cfg>(
                 entry,
                 code,
                 root_pc,
+                hook,
             );
         }
         v.push((k, r));
     }
     for (idx, a) in w {
         let (k, mut regs) = v[idx - 4].clone();
+
         let k = match riscv_decode::decode(a) {
-            Ok(i) => process::<C>(
+            Ok(i) => process::<C, H>(
                 f,
                 &i,
                 &mut regs,
@@ -488,6 +495,7 @@ pub fn go<C: Cfg>(
                 entry,
                 code,
                 root_pc,
+                hook,
             ),
             Err(_) => f.add_block(),
         };
@@ -550,7 +558,7 @@ pub fn go<C: Cfg>(
         shim,
     };
 }
-pub fn process<C: Cfg>(
+pub fn process<C: Cfg, H: Hook<Regs>>(
     f: &mut FunctionBody,
     i: &Instruction,
     regs: &mut Regs,
@@ -562,6 +570,7 @@ pub fn process<C: Cfg>(
     entry: Block,
     code: &[u8],
     root_pc: u64,
+    hook: &mut H,
 ) -> Block {
     let new = f.add_block();
     let mut t = BlockTarget {
@@ -577,7 +586,16 @@ pub fn process<C: Cfg>(
     }
     // return new;
     let mut k = new;
-
+    k = hook.hook::<C>(
+        f,
+        k,
+        regs,
+        pc,
+        funcs,
+        module,
+        code,
+        pc.wrapping_sub(root_pc).try_into().unwrap(),
+    );
     match i {
         //2.4.1
         Instruction::Addi(i) => {

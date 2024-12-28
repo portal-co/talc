@@ -104,9 +104,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.89"
+version = "1.0.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86fdf8605db99b54d3cd748a44c6d04df638eb5dafb219b135d0149bd0db01f6"
+checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
 
 [[package]]
 name = "arena-traits"
@@ -344,7 +344,7 @@ dependencies = [
  "clap-num",
  "disarm64_defn",
  "env_logger",
- "goblin",
+ "goblin 0.8.2",
  "log",
  "memmap2 0.9.5",
  "proc-macro2",
@@ -478,6 +478,17 @@ name = "goblin"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b363a30c165f666402fe6a3024d3bec7ebc898f96a4a23bd1c99f8dbf3f4f47"
+dependencies = [
+ "log",
+ "plain",
+ "scroll",
+]
+
+[[package]]
+name = "goblin"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53ab3f32d1d77146981dea5d6b1e8fe31eedcb7013e5e00d6ccd1259a4b4d923"
 dependencies = [
  "log",
  "plain",
@@ -718,6 +729,14 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "peline"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "goblin 0.9.2",
+]
 
 [[package]]
 name = "plain"
@@ -1181,6 +1200,13 @@ dependencies = [
  "portal-pc-waffle",
  "talc-common",
  "waffle-ast",
+]
+
+[[package]]
+name = "talc-xax"
+version = "0.1.0"
+dependencies = [
+ "iced-x86",
 ]
 
 [[package]]

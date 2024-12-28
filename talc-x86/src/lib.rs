@@ -758,25 +758,29 @@ pub struct X86 {}
 impl Arch for X86 {
     type Regs = Regs;
 
-    fn go<C: Cfg>(
+    fn go<C: Cfg, H: Hook<Regs>>(
         f: &mut FunctionBody,
         entry: Block,
         code: &[u8],
         root_pc: u64,
         funcs: &Funcs,
         module: &mut Module,
+        hook: &mut H,
     ) -> ArchRes {
-        crate::go::<C>(f, entry, code, root_pc, funcs, module)
+        crate::go::<C, H>(f, entry, code, root_pc, funcs, module, hook)
     }
 }
-pub fn go<C: Cfg>(
+pub fn go<C: Cfg, H: Hook<Regs>>(
     f: &mut FunctionBody,
     entry: Block,
     code: &[u8],
     root_pc: u64,
     funcs: &Funcs,
     module: &mut Module,
+    hook: &mut H,
 ) -> ArchRes {
+    let code = hook.update_code::<C>(code);
+    let code = code.as_ref();
     // let mut w = code
     //     .windows(4)
     //     .map(|w| u32::from_ne_bytes(w.try_into().unwrap()))
@@ -805,7 +809,7 @@ pub fn go<C: Cfg>(
         // let (idx, a) = w.next().unwrap();
         if let Ok(_) = ic.set_position(idx) {
             // if let Ok(i) = riscv_decode::decode(a) {
-            k = process::<C>(
+            k = process::<C, H>(
                 f,
                 &ic.decode(),
                 &mut r,
@@ -817,6 +821,7 @@ pub fn go<C: Cfg>(
                 code,
                 root_pc,
                 entry,
+                hook,
             );
         }
         // }
@@ -880,7 +885,7 @@ pub fn go<C: Cfg>(
         shim,
     };
 }
-pub fn process<C: Cfg>(
+pub fn process<C: Cfg, H: Hook<Regs>>(
     f: &mut FunctionBody,
     i: &Instruction,
     regs: &mut Regs,
@@ -892,6 +897,7 @@ pub fn process<C: Cfg>(
     code: &[u8],
     root_pc: u64,
     entry: Block,
+    hook: &mut H,
 ) -> Block {
     let new = f.add_block();
     let mut t = BlockTarget {
@@ -906,8 +912,18 @@ pub fn process<C: Cfg>(
         f.set_terminator(k, waffle::Terminator::Br { target: t });
     }
     let mut k = new;
-    fn loader<C: Cfg>(funcs: &Funcs, i: &Instruction) -> Operator {
-        match i.memory_size() {
+    k = hook.hook::<C>(
+        f,
+        k,
+        regs,
+        pc,
+        funcs,
+        module,
+        code,
+        pc.wrapping_sub(root_pc).try_into().unwrap(),
+    );
+    fn loader<C: Cfg>(funcs: &Funcs, i: MemorySize) -> Operator {
+        match i {
             MemorySize::Int8 => cdef!(C => Load8S{memory: MemoryArg {
                 align: 0,
                 offset: 0,
@@ -975,8 +991,8 @@ pub fn process<C: Cfg>(
             _ => todo!(),
         }
     }
-    fn storer<C: Cfg>(funcs: &Funcs, i: &Instruction) -> Operator {
-        match i.memory_size() {
+    fn storer<C: Cfg>(funcs: &Funcs, i: MemorySize) -> Operator {
+        match i {
             MemorySize::Int8 => cdef!(C => Store8{memory: MemoryArg {
                 align: 0,
                 offset: 0,
@@ -1061,7 +1077,7 @@ pub fn process<C: Cfg>(
                         let index = $f.add_op($k,cdef!(C => Add),&[index,disp],&[C::ty()]);
                         let index = $f.add_op($k,cdef!(C => Add),&[index,base],&[C::ty()]);
                         let op = match $funcs{
-                            funcs => loader::<C>(funcs,$i)
+                            funcs => loader::<C>(funcs,$i.memory_size())
                         };
                         let v;
                         ($k,v) = talc_common::load::<Regs,C>(index,$f,$regs,$k,op,funcs,module,entry,code,root_pc);
@@ -1152,7 +1168,7 @@ pub fn process<C: Cfg>(
                         let index = $f.add_op($k,cdef!(C => Add),&[index,disp],&[C::ty()]);
                         let index = $f.add_op($k,cdef!(C => Add),&[index,base],&[C::ty()]);
                         let op = match $funcs{
-                            funcs => storer::<C>(funcs,$i)
+                            funcs => storer::<C>(funcs,$i.memory_size())
                         };
                         talc_common::store::<Regs,C>($f,index,$v,$k,op,funcs,module,entry);
                         $k
@@ -1304,6 +1320,43 @@ pub fn process<C: Cfg>(
                         };
                         $k
                     },
+                    iced_x86::Mnemonic::Xchg => {
+                        let a = fetch!({regs: $regs, func: $f, k: $k, i: i, funcs: $funcs} op0);
+                        let b = fetch!({regs: $regs, func: $f, k: $k, i: i, funcs: $funcs} op1);
+                        let (a,b) = (b,a);
+                        $k = stor!({regs: $regs, func: $f, k: $k, i: i, v: a, funcs: $funcs} op0);
+                        stor!({regs: $regs, func: $f, k: $k, i: i, v: b, funcs: $funcs} op1)
+                    },
+                    iced_x86::Mnemonic::Pop => {
+                        let size = size!({regs: $regs, func: $f, k: $k, i: i, funcs: $funcs} op0);
+                        let sp = $regs.get::<C>(Register::RSP,$f,$k);
+                        let op = match $funcs{
+                            funcs => loader::<C>(funcs,size.clone())
+                        };
+                        let v;
+                        ($k,v) = talc_common::load::<Regs,C>(sp,$f,$regs,$k,op,funcs,module,entry,code,root_pc);
+                        $k = stor!({regs: $regs, func: $f, k: $k, i: i, v: v, funcs: $funcs} op0);
+                        let s = $f.add_op($k,C::const_64(size.size() as u64),&[],&[C::ty()]);
+                        let s = $f.add_op($k,cdef!(C => Add),&[s,sp],&[C::ty()]);
+                        $regs.set::<C>(Register::RSP,$f,$k,s);
+                        $k
+                    },
+                    iced_x86::Mnemonic::Push => {
+                        let size = size!({regs: $regs, func: $f, k: $k, i: i, funcs: $funcs} op0);
+                        let sp = $regs.get::<C>(Register::RSP,$f,$k);
+                        let op = match $funcs{
+                            funcs => storer::<C>(funcs,size.clone())
+                        };
+                        // let v;
+                        // ($k,v) = talc_common::load::<Regs,C>(sp,$f,$regs,$k,op,funcs,module,entry,code,root_pc);
+                        // $k = stor!({regs: $regs, func: $f, k: $k, i: i, v: v, funcs: $funcs} op0);
+                        let s = $f.add_op($k,C::const_64(size.size() as u64),&[],&[C::ty()]);
+                        let s = $f.add_op($k,cdef!(C => Sub),&[s,sp],&[C::ty()]);
+                        $regs.set::<C>(Register::RSP,$f,$k,s);
+                        let v = fetch!({regs: $regs, func: $f, k: $k, i: i, funcs: $funcs} op0);
+                        talc_common::store::<Regs,C>($f,s,v,$k,op,funcs,module,entry);
+                        $k
+                    }
                     _ => todo!(),
                 },
             }
