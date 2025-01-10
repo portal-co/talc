@@ -1,13 +1,22 @@
 use std::{borrow::Cow, collections::BTreeMap, iter::once};
 
+use bitvec::slice::BitSlice;
 use typenum::{Bit, Unsigned};
 pub use waffle::Operator;
 pub extern crate paste;
+pub extern crate bitvec;
 use waffle::{
     Block, BlockTarget, Func, FunctionBody, Memory, MemoryArg, MemoryData, MemorySegment, Module,
     SignatureData, Terminator, Type, Value,
 };
 use waffle_ast::{results_ref_2, Builder, Expr};
+#[derive(Clone, Copy)]
+pub struct InputRef<'a>{
+    pub code: &'a [u8],
+    pub r: &'a BitSlice,
+    pub w: &'a BitSlice,
+    pub x: &'a BitSlice
+}
 pub trait Hook<R: TRegs> {
     fn hook<C: Cfg>(
         &mut self,
@@ -17,12 +26,9 @@ pub trait Hook<R: TRegs> {
         pc: u64,
         funcs: &Funcs,
         module: &mut Module,
-        code: &[u8],
+        code: InputRef<'_>,
         code_idx: usize,
     ) -> Block;
-    fn update_code<'a, C: Cfg>(&mut self, code: &'a [u8]) -> Cow<'a, [u8]> {
-        return Cow::Borrowed(code);
-    }
 }
 impl<R: TRegs> Hook<R> for () {
     fn hook<C: Cfg>(
@@ -33,7 +39,7 @@ impl<R: TRegs> Hook<R> for () {
         pc: u64,
         funcs: &Funcs,
         module: &mut Module,
-        code: &[u8],
+        code: InputRef<'_>,
         code_idx: usize,
     ) -> Block {
         k
@@ -48,19 +54,14 @@ impl<R: TRegs, A: Hook<R>, B: Hook<R>> Hook<R> for (A, B) {
         pc: u64,
         funcs: &Funcs,
         module: &mut Module,
-        code: &[u8],
+        code: InputRef<'_>,
         code_idx: usize,
     ) -> Block {
         k = self.0.hook::<C>(f, k, r, pc, funcs, module, code, code_idx);
         k = self.1.hook::<C>(f, k, r, pc, funcs, module, code, code_idx);
         k
     }
-    fn update_code<'a, C: Cfg>(&mut self, code: &'a [u8]) -> Cow<'a, [u8]> {
-        return match self.0.update_code::<'_, C>(code) {
-            Cow::Borrowed(a) => self.1.update_code::<'_, C>(a),
-            Cow::Owned(b) => Cow::Owned(self.1.update_code::<'_, C>(b.as_slice()).into_owned()),
-        };
-    }
+
 }
 pub fn store<R: TRegs, C: Cfg>(
     // i: &SType,
@@ -116,7 +117,7 @@ pub fn load<Regs: TRegs, C: Cfg>(
     funcs: &Funcs,
     module: &Module,
     entry: Block,
-    code: &[u8],
+    code: InputRef<'_>,
     root_pc: u64,
     // mut bits: impl FnMut(usize) -> Operator,
 ) -> (Block, Value) {
@@ -220,7 +221,7 @@ pub fn load32<Regs: TRegs, C: Cfg>(
     funcs: &Funcs,
     module: &Module,
     entry: Block,
-    code: &[u8],
+    code: InputRef<'_>,
     root_pc: u64,
     // mut bits: impl FnMut(usize) -> Operator,
 ) -> (Block, Value) {
@@ -333,7 +334,7 @@ pub struct Funcs {
 impl Funcs {
     pub fn init<R: TRegs, C: Cfg>(
         &self,
-        code: &[u8],
+        code: InputRef<'_>,
         root_pc: u64,
         f: &mut FunctionBody,
         mut k: Block,
@@ -357,14 +358,14 @@ impl Funcs {
         });
         let m = if self.can_multi_memory {
             Some(module.memories.push(MemoryData {
-                initial_pages: code.len(),
-                maximum_pages: Some(code.len()),
+                initial_pages: code.code.len(),
+                maximum_pages: Some(code.code.len()),
                 page_size_log2: Some(0),
                 memory64: C::MEMORY64,
                 shared: false,
                 segments: vec![MemorySegment {
                     offset: 0,
-                    data: code.to_owned(),
+                    data: code.code.to_owned(),
                 }],
             }))
         } else {
@@ -374,7 +375,7 @@ impl Funcs {
         let v0 = f.add_op(k, Operator::I32Const { value: 0 }, &[], &[Type::I32]);
         match m {
             None => {
-                for (ca, i) in code.iter().enumerate() {
+                for (ca, i) in code.code.iter().enumerate() {
                     let c = ca as u64;
                     let c = c.wrapping_add(root_pc);
                     let v = f.add_op(k, C::const_64(c), &[], &[C::ty()]);
@@ -714,12 +715,13 @@ pub struct ArchRes {
     pub insts: BTreeMap<u64, Block>,
     pub shim: Block,
 }
+
 pub trait Arch {
     type Regs: TRegs;
     fn go<C: Cfg, H: Hook<Self::Regs>>(
         f: &mut FunctionBody,
         entry: Block,
-        code: &[u8],
+        code: InputRef<'_>,
         root_pc: u64,
         funcs: &Funcs,
         module: &mut Module,

@@ -5,9 +5,12 @@ resolver="2"
 
 [workspace.dependencies]
 
+# WASM
 
 portal-pc-waffle = "0.3.2"
 waffle-ast = "0.4"
+
+# Generiac SSA
 
 arena-traits = { version = "0.2.1", features = ["id-arena"] }
 cfg-traits = "0.2.1"
@@ -15,5 +18,26 @@ id-arena = "2.2.1"
 ssa-traits = "0.2.1"
 ssa-impls = "0.2.1"
 
+# Utilities
+
 anyhow = "1.0.95"
 goblin = "0.9.2"
+
+# ECMAScript: support libraries
+
+swc_atoms = "2.0.0"
+swc_common = "4.0.0"
+swc_ecma_ast = "4.0.0"
+swc_ecma_compat_es2015 = "5.0.0"
+swc_ecma_minifier = "5.0.0"
+swc_ecma_transforms_base = "5.0.0"
+swc_ecma_utils = "5.0.0"
+swc_ecma_visit = "4.0.0"
+
+# ECMAScript: SSA
+
+swc-cfg = {package="portal-jsc-swc-cfg",version="0.2"}
+swc-tac = {package="portal-jsc-swc-tac",version="0.2"}
+swc-ssa = {package="portal-jsc-swc-ssa",version="0.2"}
+swc-opt-ssa = {package="portal-jsc-swc-opt-ssa",version="0.2"}
+

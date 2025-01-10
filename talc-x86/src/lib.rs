@@ -761,7 +761,7 @@ impl Arch for X86 {
     fn go<C: Cfg, H: Hook<Regs>>(
         f: &mut FunctionBody,
         entry: Block,
-        code: &[u8],
+        code: InputRef<'_>,
         root_pc: u64,
         funcs: &Funcs,
         module: &mut Module,
@@ -773,22 +773,23 @@ impl Arch for X86 {
 pub fn go<C: Cfg, H: Hook<Regs>>(
     f: &mut FunctionBody,
     entry: Block,
-    code: &[u8],
+    code: InputRef<'_>,
     root_pc: u64,
     funcs: &Funcs,
     module: &mut Module,
     hook: &mut H,
 ) -> ArchRes {
-    let code = hook.update_code::<C>(code);
-    let code = code.as_ref();
+    // let code = hook.update_code::<C>(code);
+    // let code = code.as_ref();
     // let mut w = code
     //     .windows(4)
     //     .map(|w| u32::from_ne_bytes(w.try_into().unwrap()))
     //     .enumerate();
-    let mut ic = iced_x86::Decoder::new(if C::MEMORY64 { 64 } else { 32 }, code, 0);
+    let mut ic = iced_x86::Decoder::new(if C::MEMORY64 { 64 } else { 32 }, code.code, 0);
     let shim = f.add_block();
     let mut v: Vec<(Block, Regs)> = vec![];
     let mut back: BTreeMap<usize, usize> = BTreeMap::new();
+    let mut fwd = BTreeMap::new();
     for idx in 0..(ic.max_position()) {
         let (mut k, mut r) = match back.get(&idx).cloned() {
             Some(a) => v[a].clone(),
@@ -827,6 +828,7 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
         // }
         v.push((k, r));
         back.insert(ic.position(), idx);
+        fwd.insert(idx, ic.position());
     }
     let pc = f.add_blockparam(shim, C::ty());
     let regs: [Value; Regs::N] = std::array::from_fn(|i| {
@@ -855,6 +857,23 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
                 .map(|(a, _)| BlockTarget {
                     block: *a,
                     args: regs.iter().cloned().collect(),
+                })
+                .enumerate()
+                .map(|(i, b)| {
+                    let v = code.x[i..(match fwd.get(&i) {
+                        None => i + 1,
+                        Some(b) => *b,
+                    })]
+                        .iter()
+                        .all(|a| *a);
+                    if v {
+                        b
+                    } else {
+                        BlockTarget {
+                            block: rb,
+                            args: vec![],
+                        }
+                    }
                 })
                 .collect(),
             default: BlockTarget {
@@ -894,7 +913,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
     shim: Block,
     funcs: &Funcs,
     module: &mut Module,
-    code: &[u8],
+    code: InputRef<'_>,
     root_pc: u64,
     entry: Block,
     hook: &mut H,

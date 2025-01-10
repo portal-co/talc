@@ -1,4 +1,4 @@
-use talc_common::{Arch, Cfg, Funcs, Hook, TRegs};
+use talc_common::{bitvec::vec::BitVec, Arch, Cfg, Funcs, Hook, InputRef, TRegs};
 use typenum::Same;
 use waffle::{Block, FunctionBody, Module};
 
@@ -16,7 +16,20 @@ pub trait Felf: Arch {
         (base, code) = code.split_at_checked(16)?;
         let entry2 = u64::from_le_bytes(base[..8].try_into().unwrap());
         let base = u64::from_le_bytes(base[8..].try_into().unwrap());
-        let v = Self::go::<C, H>(f, entry, code, base, funcs, module, hook);
+        let v = Self::go::<C, H>(
+            f,
+            entry,
+            InputRef {
+                code,
+                r: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                w: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                x: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+            },
+            base,
+            funcs,
+            module,
+            hook,
+        );
         return v.insts.get(&entry2).cloned();
     }
     fn felf2<C: Cfg, H: Hook<Self::Regs>>(
@@ -32,7 +45,33 @@ pub trait Felf: Arch {
         (base, code) = code.split_at_checked(16)?;
         let entry2 = u64::from_le_bytes(base[..8].try_into().unwrap());
         let base = u64::from_le_bytes(base[8..].try_into().unwrap());
-        let v = Self::go::<C, H>(f, entry, code, base, funcs, module, hook);
+        let (code, perms) = code.split_at_checked(code.len() / 2)?;
+        let v = Self::go::<C, H>(
+            f,
+            entry,
+            InputRef {
+                code,
+                r: perms
+                    .iter()
+                    .map(|a| a & 0x1 != 0)
+                    .collect::<BitVec>()
+                    .as_ref(),
+                w: perms
+                    .iter()
+                    .map(|a| a & 0x2 != 0)
+                    .collect::<BitVec>()
+                    .as_ref(),
+                x: perms
+                    .iter()
+                    .map(|a| a & 0x4 != 0)
+                    .collect::<BitVec>()
+                    .as_ref(),
+            },
+            base,
+            funcs,
+            module,
+            hook,
+        );
         return v.insts.get(&entry2).cloned();
     }
 }
@@ -54,7 +93,12 @@ pub trait FelfFuncs: Same<Output = Funcs> + Sized {
         return Some(Funcs::init::<R, C>(
             //SAFETY: same type
             unsafe { std::mem::transmute(self) },
-            code,
+            InputRef {
+                code,
+                r: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                w: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                x: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+            },
             base,
             f,
             k,
@@ -75,10 +119,28 @@ pub trait FelfFuncs: Same<Output = Funcs> + Sized {
         (base, code) = code.split_at_checked(16)?;
         let entry2 = u64::from_le_bytes(base[..8].try_into().unwrap());
         let base = u64::from_le_bytes(base[8..].try_into().unwrap());
+        let (code, perms) = code.split_at_checked(code.len() / 2)?;
         return Some(Funcs::init::<R, C>(
             //SAFETY: same type
             unsafe { std::mem::transmute(self) },
-            code,
+            InputRef {
+                code,
+                r: perms
+                    .iter()
+                    .map(|a| a & 0x1 != 0)
+                    .collect::<BitVec>()
+                    .as_ref(),
+                w: perms
+                    .iter()
+                    .map(|a| a & 0x2 != 0)
+                    .collect::<BitVec>()
+                    .as_ref(),
+                x: perms
+                    .iter()
+                    .map(|a| a & 0x4 != 0)
+                    .collect::<BitVec>()
+                    .as_ref(),
+            },
             base,
             f,
             k,

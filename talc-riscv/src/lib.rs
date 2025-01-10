@@ -62,7 +62,7 @@ pub fn imm<C: Cfg>(
     funcs: &Funcs,
     module: &Module,
     entry: Block,
-    code: &[u8],
+    code: InputRef<'_>,
     root_pc: u64,
     // mut bits: impl FnMut(usize) -> Operator,
 ) -> Block {
@@ -173,7 +173,7 @@ pub fn imm32<C: Cfg>(
     funcs: &Funcs,
     module: &Module,
     entry: Block,
-    code: &[u8],
+    code: InputRef<'_>,
     root_pc: u64,
     // mut bits: impl FnMut(usize) -> Operator,
 ) -> Block {
@@ -417,7 +417,7 @@ impl Arch for R5 {
     fn go<C: Cfg, H: Hook<Self::Regs>>(
         f: &mut FunctionBody,
         entry: Block,
-        code: &[u8],
+        code: InputRef<'_>,
         root_pc: u64,
         funcs: &Funcs,
         module: &mut Module,
@@ -429,15 +429,16 @@ impl Arch for R5 {
 pub fn go<C: Cfg, H: Hook<Regs>>(
     f: &mut FunctionBody,
     entry: Block,
-    code: &[u8],
+    code: InputRef<'_>,
     root_pc: u64,
     funcs: &Funcs,
     module: &mut Module,
     hook: &mut H,
 ) -> ArchRes {
-    let code = hook.update_code::<C>(code);
-    let code = code.as_ref();
+    // let code = hook.update_code::<C>(code);
+    // let code = code.as_ref();
     let mut w = code
+        .code
         .windows(4)
         .map(|w| u32::from_ne_bytes(w.try_into().unwrap()))
         .enumerate();
@@ -529,6 +530,18 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
                     block: *a,
                     args: regs.iter().cloned().collect(),
                 })
+                .enumerate()
+                .map(|(i, b)| {
+                    let v = code.x[i..][..4].iter().all(|a| *a);
+                    if v {
+                        b
+                    } else {
+                        BlockTarget {
+                            block: rb,
+                            args: vec![],
+                        }
+                    }
+                })
                 .collect(),
             default: BlockTarget {
                 block: rb,
@@ -568,7 +581,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
     funcs: &Funcs,
     module: &mut Module,
     entry: Block,
-    code: &[u8],
+    code: InputRef<'_>,
     root_pc: u64,
     hook: &mut H,
 ) -> Block {
