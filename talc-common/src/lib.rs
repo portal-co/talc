@@ -1,21 +1,48 @@
 use std::{borrow::Cow, collections::BTreeMap, iter::once};
 
-use bitvec::slice::BitSlice;
+use bitvec::{slice::BitSlice, vec::BitVec};
 use typenum::{Bit, Unsigned};
 pub use waffle::Operator;
-pub extern crate paste;
 pub extern crate bitvec;
+pub extern crate paste;
 use waffle::{
     Block, BlockTarget, Func, FunctionBody, Memory, MemoryArg, MemoryData, MemorySegment, Module,
     SignatureData, Terminator, Type, Value,
 };
 use waffle_ast::{results_ref_2, Builder, Expr};
 #[derive(Clone, Copy)]
-pub struct InputRef<'a>{
+pub struct InputRef<'a> {
     pub code: &'a [u8],
     pub r: &'a BitSlice,
     pub w: &'a BitSlice,
-    pub x: &'a BitSlice
+    pub x: &'a BitSlice,
+}
+#[derive(Clone)]
+pub struct Input {
+    pub code: Vec<u8>,
+    pub r: BitVec,
+    pub w: BitVec,
+    pub x: BitVec,
+}
+impl Input {
+    pub fn borrow<'a>(&'a self) -> InputRef<'a> {
+        InputRef {
+            code: &self.code,
+            r: &self.r,
+            w: &self.w,
+            x: &self.x,
+        }
+    }
+}
+impl<'a> InputRef<'a> {
+    pub fn to_owned(self) -> Input {
+        Input {
+            code: self.code.to_owned(),
+            r: self.r.to_owned(),
+            w: self.w.to_owned(),
+            x: self.x.to_owned(),
+        }
+    }
 }
 pub trait Hook<R: TRegs> {
     fn hook<C: Cfg>(
@@ -61,7 +88,6 @@ impl<R: TRegs, A: Hook<R>, B: Hook<R>> Hook<R> for (A, B) {
         k = self.1.hook::<C>(f, k, r, pc, funcs, module, code, code_idx);
         k
     }
-
 }
 pub fn store<R: TRegs, C: Cfg>(
     // i: &SType,
@@ -119,49 +145,61 @@ pub fn load<Regs: TRegs, C: Cfg>(
     entry: Block,
     code: InputRef<'_>,
     root_pc: u64,
-    // mut bits: impl FnMut(usize) -> Operator,
+    mut bits: impl FnMut(usize) -> Operator,
 ) -> (Block, Value) {
     let n = f.add_block();
     // let v = f.add_op(k, C::const_32(i.imm()), &[], &[C::ty()]);
     // let w = regs.reg::<C>(f, i.rs1() as u8, k);
     // if load {
-    //     let k2 = f.add_block();
-    //     let b = f.add_op(k, C::const_64(root_pc), &[], &[C::ty()]);
-    //     let b = f.add_op(k, cdef!(C => Sub), &[w, b], &[C::ty()]);
-    //     let ts = code
-    //         .iter()
-    //         .enumerate()
-    //         .map(|a| bits(a.0))
-    //         .map(|o| {
-    //             let l = f.add_block();
-    //             let v = f.add_op(l, o, &[], &[C::ty()]);
-    //             f.set_terminator(
-    //                 l,
-    //                 Terminator::Br {
-    //                     target: BlockTarget {
-    //                         block: n,
-    //                         args: vec![v],
-    //                     },
-    //                 },
-    //             );
-    //             BlockTarget {
-    //                 block: l,
-    //                 args: vec![],
-    //             }
-    //         })
-    //         .collect();
-    //     f.set_terminator(
-    //         k,
-    //         Terminator::Select {
-    //             value: b,
-    //             targets: ts,
-    //             default: BlockTarget {
-    //                 block: k2,
-    //                 args: vec![],
-    //             },
-    //         },
-    //     );
-    //     k = k2;
+    let k2 = f.add_block();
+    let b = f.add_op(k, C::const_64(root_pc), &[], &[C::ty()]);
+    let b = f.add_op(k, cdef!(C => Sub), &[w, b], &[C::ty()]);
+    let ts = code
+        .code
+        .iter()
+        .enumerate()
+        .map(|a| bits(a.0))
+        .map(|o| {
+            let l = f.add_block();
+            let v = f.add_op(l, o, &[], &[C::ty()]);
+            f.set_terminator(
+                l,
+                Terminator::Br {
+                    target: BlockTarget {
+                        block: n,
+                        args: vec![v],
+                    },
+                },
+            );
+            BlockTarget {
+                block: l,
+                args: vec![],
+            }
+        })
+        .enumerate()
+        .map(|(i, a)| {
+            if code.w[i..][..8].iter().any(|a| *a) {
+                a
+            } else {
+                BlockTarget {
+                    block: k2,
+                    args: vec![],
+                }
+            }
+        })
+        .collect();
+    f.set_terminator(
+        k,
+        Terminator::Select {
+            value: b,
+            targets: ts,
+            default: BlockTarget {
+                block: k2,
+                args: vec![],
+            },
+        },
+    );
+    k = k2;
     // };
     let (w, d) = {
         let mut ctx = Regs::ctx(f, entry).collect::<Vec<_>>();
@@ -223,50 +261,63 @@ pub fn load32<Regs: TRegs, C: Cfg>(
     entry: Block,
     code: InputRef<'_>,
     root_pc: u64,
-    // mut bits: impl FnMut(usize) -> Operator,
+    mut bits: impl FnMut(usize) -> Operator,
 ) -> (Block, Value) {
     let n = f.add_block();
     // let v = f.add_op(k, Operator::I32Const { value: i.imm() }, &[], &[Type::I32]);
     // let w = regs.reg::<C>(f, i.rs1() as u8, k);
     // if load {
-    //     let k2 = f.add_block();
-    //     let b = f.add_op(k, C::const_64(root_pc), &[], &[C::ty()]);
-    //     let b = f.add_op(k, cdef!(C => Sub), &[w, b], &[C::ty()]);
-    //     let ts = code
-    //         .iter()
-    //         .enumerate()
-    //         .map(|a| bits(a.0))
-    //         .map(|o| {
-    //             let l = f.add_block();
-    //             let v = f.add_op(l, o, &[], &[C::ty()]);
-    //             f.set_terminator(
-    //                 l,
-    //                 Terminator::Br {
-    //                     target: BlockTarget {
-    //                         block: n,
-    //                         args: vec![v],
-    //                     },
-    //                 },
-    //             );
-    //             BlockTarget {
-    //                 block: l,
-    //                 args: vec![],
-    //             }
-    //         })
-    //         .collect();
-    //     f.set_terminator(
-    //         k,
-    //         Terminator::Select {
-    //             value: b,
-    //             targets: ts,
-    //             default: BlockTarget {
-    //                 block: k2,
-    //                 args: vec![],
-    //             },
-    //         },
-    //     );
-    //     k = k2;
+    let k2 = f.add_block();
+    let b = f.add_op(k, C::const_64(root_pc), &[], &[C::ty()]);
+    let b = f.add_op(k, cdef!(C => Sub), &[w, b], &[C::ty()]);
+    let ts = code
+        .code
+        .iter()
+        .enumerate()
+        .map(|a| bits(a.0))
+        .map(|o| {
+            let l = f.add_block();
+            let v = f.add_op(l, o, &[], &[C::ty()]);
+            f.set_terminator(
+                l,
+                Terminator::Br {
+                    target: BlockTarget {
+                        block: n,
+                        args: vec![v],
+                    },
+                },
+            );
+            BlockTarget {
+                block: l,
+                args: vec![],
+            }
+        })
+        .enumerate()
+        .map(|(i, a)| {
+            if !code.w[i..][..8].iter().any(|a| *a) {
+                a
+            } else {
+                BlockTarget {
+                    block: k2,
+                    args: vec![],
+                }
+            }
+        })
+        .collect();
+    f.set_terminator(
+        k,
+        Terminator::Select {
+            value: b,
+            targets: ts,
+            default: BlockTarget {
+                block: k2,
+                args: vec![],
+            },
+        },
+    );
+    k = k2;
     // };
+
     let (w, d) = {
         let mut ctx = Regs::ctx(f, entry).collect::<Vec<_>>();
         ctx.push(w);
@@ -365,7 +416,11 @@ impl Funcs {
                 shared: false,
                 segments: vec![MemorySegment {
                     offset: 0,
-                    data: code.code.to_owned(),
+                    data: code.code.iter().enumerate().map(|(i,a)|if *code.r.get(i).unwrap(){
+                        *a
+                    }else{
+                        0
+                    }).collect(),
                 }],
             }))
         } else {
@@ -375,7 +430,13 @@ impl Funcs {
         let v0 = f.add_op(k, Operator::I32Const { value: 0 }, &[], &[Type::I32]);
         match m {
             None => {
-                for (ca, i) in code.code.iter().enumerate() {
+                for (ca, i) in code
+                    .code
+                    .iter()
+                    .enumerate()
+                    .map(|(i, a)| if *code.r.get(i).unwrap() { *a } else { 0 })
+                    .enumerate()
+                {
                     let c = ca as u64;
                     let c = c.wrapping_add(root_pc);
                     let v = f.add_op(k, C::const_64(c), &[], &[C::ty()]);
@@ -390,7 +451,7 @@ impl Funcs {
                     );
                     let mut r = results_ref_2(f, r);
                     let w = r.pop().unwrap();
-                    let v = vs[*i as usize];
+                    let v = vs[i as usize];
                     let v = f.add_op(
                         k,
                         Operator::I32Store8 {

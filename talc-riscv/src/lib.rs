@@ -64,12 +64,12 @@ pub fn imm<C: Cfg>(
     entry: Block,
     code: InputRef<'_>,
     root_pc: u64,
-    // mut bits: impl FnMut(usize) -> Operator,
+    mut bits: impl FnMut(usize) -> Operator,
 ) -> Block {
     let w = regs.reg::<C>(f, i.rs1() as u8, k);
     if load {
         let (n, v) =
-            talc_common::load::<Regs, C>(w, f, regs, k, op, funcs, module, entry, code, root_pc);
+            talc_common::load::<Regs, C>(w, f, regs, k, op, funcs, module, entry, code, root_pc,bits);
         regs.put_reg(i.rd() as u8, v);
         return n;
     }
@@ -175,12 +175,12 @@ pub fn imm32<C: Cfg>(
     entry: Block,
     code: InputRef<'_>,
     root_pc: u64,
-    // mut bits: impl FnMut(usize) -> Operator,
+    mut bits: impl FnMut(usize) -> Operator,
 ) -> Block {
     let w = regs.reg::<C>(f, i.rs1() as u8, k);
     if load {
         let (n, v) =
-            talc_common::load32::<Regs, C>(w, f, regs, k, op, funcs, module, entry, code, root_pc);
+            talc_common::load32::<Regs, C>(w, f, regs, k, op, funcs, module, entry, code, root_pc, bits);
         regs.put_reg(i.rd() as u8, v);
         return n;
     }
@@ -624,7 +624,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |_| unreachable!(),
+                |_| unreachable!(),
             );
         }
         Instruction::Andi(i) => {
@@ -640,7 +640,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |_| unreachable!(),
+                |_| unreachable!(),
             );
         }
         Instruction::Ori(i) => {
@@ -656,7 +656,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |_| unreachable!(),
+                |_| unreachable!(),
             );
         }
         Instruction::Xori(i) => {
@@ -672,7 +672,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |_| unreachable!(),
+                |_| unreachable!(),
             );
         }
         Instruction::Slti(i) => {
@@ -688,7 +688,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |_| unreachable!(),
+                |_| unreachable!(),
             );
         }
         Instruction::Sltiu(i) => {
@@ -704,7 +704,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |_| unreachable!(),
+                |_| unreachable!(),
             );
         }
         Instruction::Slli(i) => {
@@ -752,7 +752,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |_| unreachable!(),
+                |_| unreachable!(),
             );
         }
         // Instruction::Andiw(i) => {
@@ -923,7 +923,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |i| C::const_64(code[i].clone() as i8 as i64 as u64),
+                |i| C::const_64(code.code[i].clone() as i8 as i64 as u64),
             );
         }
         Instruction::Lbu(l) => {
@@ -943,7 +943,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |i| C::const_64(code[i].clone() as u64),
+                |i| C::const_64(code.code[i].clone() as u64),
             );
         }
         Instruction::Lh(l) => {
@@ -963,11 +963,11 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |i| {
-                //     C::const_64(
-                //         u16::from_le_bytes(code[i..][..2].try_into().unwrap()) as i16 as i64 as u64,
-                //     )
-                // },
+                |i| {
+                    C::const_64(
+                        u16::from_le_bytes(code.code[i..][..2].try_into().unwrap()) as i16 as i64 as u64,
+                    )
+                },
             );
         }
         Instruction::Lhu(l) => {
@@ -987,7 +987,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |i| C::const_64(u16::from_le_bytes(code[i..][..2].try_into().unwrap()) as u64),
+                |i| C::const_64(u16::from_le_bytes(code.code[i..][..2].try_into().unwrap()) as u64),
             );
         }
         Instruction::Lw(l) => {
@@ -1019,11 +1019,11 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |i| {
-                //     C::const_64(
-                //         u32::from_le_bytes(code[i..][..4].try_into().unwrap()) as i32 as i64 as u64,
-                //     )
-                // },
+                |i| {
+                    C::const_64(
+                        u32::from_le_bytes(code.code[i..][..4].try_into().unwrap()) as i32 as i64 as u64,
+                    )
+                },
             );
         }
         //4.3
@@ -1056,7 +1056,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |i| C::const_64(u32::from_le_bytes(code[i..][..4].try_into().unwrap()) as u64),
+                |i| C::const_64(u32::from_le_bytes(code.code[i..][..4].try_into().unwrap()) as u64),
             );
         }
         Instruction::Ld(l) => {
@@ -1088,7 +1088,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 entry,
                 code,
                 root_pc,
-                // |i| C::const_64(u64::from_le_bytes(code[i..][..8].try_into().unwrap())),
+                |i| C::const_64(u64::from_le_bytes(code.code[i..][..8].try_into().unwrap())),
             )
         }
         //Stores
