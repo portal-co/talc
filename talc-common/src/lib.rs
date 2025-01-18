@@ -33,6 +33,14 @@ impl Input {
             x: &self.x,
         }
     }
+    pub fn expand(&mut self, new_len: usize){
+        while self.code.len() < new_len{
+            self.code.push(0);
+            self.r.push(false);
+            self.w.push(false);
+            self.x.push(false);
+        }
+    }
 }
 impl<'a> InputRef<'a> {
     pub fn to_owned(self) -> Input {

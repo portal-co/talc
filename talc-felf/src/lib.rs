@@ -1,7 +1,20 @@
 use talc_common::{bitvec::vec::BitVec, Arch, Cfg, Funcs, Hook, InputRef, TRegs};
 use typenum::Same;
 use waffle::{Block, FunctionBody, Module};
-
+pub trait ToFelf {
+    fn to_felf2(&self, entry: u64, root_pc: u64) -> impl Iterator<Item = u8>;
+}
+impl<'a> ToFelf for InputRef<'a> {
+    fn to_felf2(&self, entry: u64, root_pc: u64) -> impl Iterator<Item = u8> {
+        return b"FELF0002".iter().cloned().chain(u64::to_le_bytes(entry).into_iter()).chain(u64::to_le_bytes(root_pc).into_iter()).chain(self.code.iter().cloned()).chain(self.r.iter().zip(self.w.iter()).zip(self.x.iter()).map(|((r,w),x)|if *r{
+            0x1
+        }else{
+            0
+        } | if *w{
+            0x2
+        } else {0} | if *x{0x4} else{0}));
+    }
+}
 pub trait Felf: Arch {
     fn felf1<C: Cfg, H: Hook<Self::Regs>>(
         f: &mut FunctionBody,

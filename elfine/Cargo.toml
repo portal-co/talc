@@ -1,10 +1,9 @@
 [package]
-name = "peline"
+name = "elfine"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
-async-trait = "0.1.85"
 goblin.workspace = true
 talc-common = { version = "0.1.0", path = "../talc-common" }

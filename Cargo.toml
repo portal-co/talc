@@ -1,5 +1,5 @@
 [workspace]
-members=[  "talc-common","talc-riscv","talc-aarch64", "talc-felf","talc-x86", "talc-mimd", "talc-malbolge-frontend", "peline", "talc-xax"] 
+members=[  "talc-common","talc-riscv","talc-aarch64", "talc-felf","talc-x86", "talc-mimd", "talc-malbolge-frontend", "peline", "talc-xax", "talc-mips", "elfine"] 
 # , "talc-x86","talc-aarch64",
 resolver="2"
 
