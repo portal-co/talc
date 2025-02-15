@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, mem::replace};
 
-use disarm64::Opcode;
+use disarm64::{decoder::{Mnemonic, Operation}, Opcode};
 // use riscv_decode::{
 //     types::{BType, IType, RType, SType, ShiftType},
 //     Instruction,
@@ -244,11 +244,58 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         code,
         pc.wrapping_sub(root_pc).try_into().unwrap(),
     );
-    match (&i.mnemonic, &i.operation) {
-        //Fallback
-        i => {
-            dbg!("instruction not supported: ", i);
+    return i.mnemonic.process::<C, H>(
+        f,
+        &i.operation,
+        regs,
+        k,
+        pc,
+        shim,
+        entry,
+        funcs,
+        module,
+        hook,
+        code,
+        root_pc,
+    );
+}
+pub trait AArch64Mnemonic<O> {
+    fn process<C: Cfg, H: Hook<Regs>>(
+        &self,
+        f: &mut FunctionBody,
+        i: &O,
+        regs: &mut Regs,
+        k: Block,
+        pc: u64,
+        shim: Block,
+        entry: Block,
+        funcs: &Funcs,
+        module: &mut Module,
+        hook: &mut H,
+        code: InputRef<'_>,
+        root_pc: u64,
+    ) -> Block;
+}
+impl AArch64Mnemonic<Operation> for Mnemonic{
+    fn process<C: Cfg, H: Hook<Regs>>(
+        &self,
+        f: &mut FunctionBody,
+        i: &Operation,
+        regs: &mut Regs,
+        k: Block,
+        pc: u64,
+        shim: Block,
+        entry: Block,
+        funcs: &Funcs,
+        module: &mut Module,
+        hook: &mut H,
+        code: InputRef<'_>,
+        root_pc: u64,
+    ) -> Block {
+        match self{
+            _ => {
+                f.add_block()
+            }
         }
-    };
-    return k;
+    }
 }

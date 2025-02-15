@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::BTreeMap, iter::once};
+use std::{borrow::Cow, collections::BTreeMap, iter::once, sync::OnceLock};
 
 use bitvec::{slice::BitSlice, vec::BitVec};
 use typenum::{Bit, Unsigned};
@@ -33,8 +33,8 @@ impl Input {
             x: &self.x,
         }
     }
-    pub fn expand(&mut self, new_len: usize){
-        while self.code.len() < new_len{
+    pub fn expand(&mut self, new_len: usize) {
+        while self.code.len() < new_len {
             self.code.push(0);
             self.r.push(false);
             self.w.push(false);
@@ -65,6 +65,7 @@ pub trait Hook<R: TRegs> {
         code_idx: usize,
     ) -> Block;
 }
+
 impl<R: TRegs> Hook<R> for () {
     fn hook<C: Cfg>(
         &mut self,
@@ -162,27 +163,56 @@ pub fn load<Regs: TRegs, C: Cfg>(
     let k2 = f.add_block();
     let b = f.add_op(k, C::const_64(root_pc), &[], &[C::ty()]);
     let b = f.add_op(k, cdef!(C => Sub), &[w, b], &[C::ty()]);
+    let ld = funcs.code_mem.get().map(|m| {
+        let l = f.add_block();
+        let v = {
+            let mut op2 = op.clone();
+            op2.update_memory_arg(|a| {
+                a.memory = *m;
+                a.offset = 0;
+            });
+            let v = f.add_blockparam(l, C::ty());
+            f.add_op(l, op2, &[v], &[C::ty()])
+        };
+        f.set_terminator(
+            l,
+            Terminator::Br {
+                target: BlockTarget {
+                    block: n,
+                    args: vec![v],
+                },
+            },
+        );
+        l
+    });
     let ts = code
         .code
         .iter()
         .enumerate()
         .map(|a| bits(a.0))
-        .map(|o| {
-            let l = f.add_block();
-            let v = f.add_op(l, o, &[], &[C::ty()]);
-            f.set_terminator(
-                l,
-                Terminator::Br {
-                    target: BlockTarget {
-                        block: n,
-                        args: vec![v],
+        .enumerate()
+        .map(|(dx, o)| match ld.as_ref().cloned() {
+            None => {
+                let l = f.add_block();
+                let v = f.add_op(l, o, &[], &[C::ty()]);
+                f.set_terminator(
+                    l,
+                    Terminator::Br {
+                        target: BlockTarget {
+                            block: n,
+                            args: vec![v],
+                        },
                     },
-                },
-            );
-            BlockTarget {
-                block: l,
-                args: vec![],
+                );
+                BlockTarget {
+                    block: l,
+                    args: vec![],
+                }
             }
+            Some(l) => BlockTarget {
+                block: l,
+                args: vec![b],
+            },
         })
         .enumerate()
         .map(|(i, a)| {
@@ -278,27 +308,56 @@ pub fn load32<Regs: TRegs, C: Cfg>(
     let k2 = f.add_block();
     let b = f.add_op(k, C::const_64(root_pc), &[], &[C::ty()]);
     let b = f.add_op(k, cdef!(C => Sub), &[w, b], &[C::ty()]);
+    let ld = funcs.code_mem.get().map(|m| {
+        let l = f.add_block();
+        let v = {
+            let mut op2 = op.clone();
+            op2.update_memory_arg(|a| {
+                a.memory = *m;
+                a.offset = 0;
+            });
+            let v = f.add_blockparam(l, C::ty());
+            f.add_op(l, op2, &[v], &[C::ty()])
+        };
+        f.set_terminator(
+            l,
+            Terminator::Br {
+                target: BlockTarget {
+                    block: n,
+                    args: vec![v],
+                },
+            },
+        );
+        l
+    });
     let ts = code
         .code
         .iter()
         .enumerate()
         .map(|a| bits(a.0))
-        .map(|o| {
-            let l = f.add_block();
-            let v = f.add_op(l, o, &[], &[C::ty()]);
-            f.set_terminator(
-                l,
-                Terminator::Br {
-                    target: BlockTarget {
-                        block: n,
-                        args: vec![v],
+        .enumerate()
+        .map(|(dx, o)| match ld.as_ref().cloned() {
+            None => {
+                let l = f.add_block();
+                let v = f.add_op(l, o, &[], &[C::ty()]);
+                f.set_terminator(
+                    l,
+                    Terminator::Br {
+                        target: BlockTarget {
+                            block: n,
+                            args: vec![v],
+                        },
                     },
-                },
-            );
-            BlockTarget {
-                block: l,
-                args: vec![],
+                );
+                BlockTarget {
+                    block: l,
+                    args: vec![],
+                }
             }
+            Some(l) => BlockTarget {
+                block: l,
+                args: vec![b],
+            },
         })
         .enumerate()
         .map(|(i, a)| {
@@ -389,6 +448,7 @@ pub struct Funcs {
     pub finalize: Func,
     pub deopt: Func,
     pub can_multi_memory: bool,
+    pub code_mem: OnceLock<Memory>,
 }
 impl Funcs {
     pub fn init<R: TRegs, C: Cfg>(
@@ -416,20 +476,23 @@ impl Funcs {
             )
         });
         let m = if self.can_multi_memory {
-            Some(module.memories.push(MemoryData {
-                initial_pages: code.code.len(),
-                maximum_pages: Some(code.code.len()),
-                page_size_log2: Some(0),
-                memory64: C::MEMORY64,
-                shared: false,
-                segments: vec![MemorySegment {
-                    offset: 0,
-                    data: code.code.iter().enumerate().map(|(i,a)|if *code.r.get(i).unwrap(){
-                        *a
-                    }else{
-                        0
-                    }).collect(),
-                }],
+            Some(*self.code_mem.get_or_init(|| {
+                module.memories.push(MemoryData {
+                    initial_pages: code.code.len(),
+                    maximum_pages: Some(code.code.len()),
+                    page_size_log2: Some(0),
+                    memory64: C::MEMORY64,
+                    shared: false,
+                    segments: vec![MemorySegment {
+                        offset: 0,
+                        data: code
+                            .code
+                            .iter()
+                            .enumerate()
+                            .map(|(i, a)| if *code.r.get(i).unwrap() { *a } else { 0 })
+                            .collect(),
+                    }],
+                })
             }))
         } else {
             None
