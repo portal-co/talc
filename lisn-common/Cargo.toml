@@ -1,0 +1,11 @@
+[package]
+name = "lisn-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+portal-pc-asm-common = { version = "0.1.0", features = ["alloc","serde"] }
+serde = { version = "1.0.217", default-features = false, features = ["derive", "alloc"] }
+
+
+typenum = { version = "1.17.0", features = ["const-generics"] }

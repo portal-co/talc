@@ -1,5 +1,7 @@
 [workspace]
-members=[  "talc-common","talc-riscv","talc-aarch64", "talc-felf","talc-x86", "talc-mimd", "talc-malbolge-frontend", "peline", "talc-xax", "talc-mips", "elfine"] 
+members=[  "talc-common","talc-riscv","talc-aarch64", "talc-felf","talc-x86", "talc-mimd"]
+
+# , "talc-malbolge-frontend", "peline", "talc-xax", "talc-mips", "elfine", "lisn-common"
 # , "talc-x86","talc-aarch64",
 resolver="2"
 
@@ -7,7 +9,7 @@ resolver="2"
 
 # WASM
 
-portal-pc-waffle = "0.3.2"
+portal-pc-waffle = "0.3.8"
 waffle-ast = "0.4"
 
 # Generiac SSA

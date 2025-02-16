@@ -1,4 +1,5 @@
 use std::{
+    array,
     collections::BTreeMap,
     mem::{replace, swap},
 };
@@ -16,13 +17,13 @@ use waffle_ast::results_ref_2;
 use talc_common::*;
 
 #[derive(Clone)]
-pub struct Regs {
+pub struct Regs<const CSRS: usize = 4096> {
     pub regs: [Value; 31],
-    pub csrs: [Value; 4096],
+    pub csrs: [Value; CSRS],
 }
 
-impl Regs {
-    pub const N: usize = 31 + 4096;
+impl<const CSRS: usize> Regs<CSRS> {
+    pub const N: usize = 31 + CSRS;
     pub fn reg<C: Cfg>(&self, f: &mut FunctionBody, b: u8, k: Block) -> Value {
         if b == 0 {
             f.add_op(k, C::const_32(0), &[], &[C::ty()])
@@ -37,8 +38,8 @@ impl Regs {
         }
     }
 }
-impl TRegs for Regs {
-    const N: usize = Regs::N;
+impl<const CSRS: usize> TRegs for Regs<CSRS> {
+    const N: usize = Regs::<CSRS>::N;
 
     fn iter(&self) -> impl Iterator<Item = Value> {
         self.regs.iter().chain(self.csrs.iter()).cloned()
@@ -55,10 +56,10 @@ impl TRegs for Regs {
 //         .collect::<Vec<_>>();
 //     ctx
 // }
-pub fn imm<C: Cfg>(
+pub fn imm<const CSRS: usize, C: Cfg>(
     i: &IType,
     f: &mut FunctionBody,
-    regs: &mut Regs,
+    regs: &mut Regs<CSRS>,
     mut k: Block,
     op: Operator,
     load: bool,
@@ -71,7 +72,7 @@ pub fn imm<C: Cfg>(
 ) -> Block {
     let w = regs.reg::<C>(f, i.rs1() as u8, k);
     if load {
-        let (n, v) = talc_common::load::<Regs, C>(
+        let (n, v) = talc_common::load::<Regs<CSRS>, C>(
             w, f, regs, k, op, funcs, module, entry, code, root_pc, bits,
         );
         regs.put_reg(i.rd() as u8, v);
@@ -167,10 +168,10 @@ pub fn imm<C: Cfg>(
     regs.put_reg(i.rd() as u8, v);
     return n;
 }
-pub fn imm32<C: Cfg>(
+pub fn imm32<const CSRS: usize, C: Cfg>(
     i: &IType,
     f: &mut FunctionBody,
-    regs: &mut Regs,
+    regs: &mut Regs<CSRS>,
     mut k: Block,
     op: Operator,
     load: bool,
@@ -183,7 +184,7 @@ pub fn imm32<C: Cfg>(
 ) -> Block {
     let w = regs.reg::<C>(f, i.rs1() as u8, k);
     if load {
-        let (n, v) = talc_common::load32::<Regs, C>(
+        let (n, v) = talc_common::load32::<Regs<CSRS>, C>(
             w, f, regs, k, op, funcs, module, entry, code, root_pc, bits,
         );
         regs.put_reg(i.rd() as u8, v);
@@ -290,10 +291,10 @@ pub fn imm32<C: Cfg>(
     regs.put_reg(i.rd() as u8, v);
     return n;
 }
-pub fn store<C: Cfg>(
+pub fn store<const CSRS: usize, C: Cfg>(
     i: &SType,
     f: &mut FunctionBody,
-    regs: &mut Regs,
+    regs: &mut Regs<CSRS>,
     k: Block,
     op: Operator,
     funcs: &Funcs,
@@ -305,13 +306,25 @@ pub fn store<C: Cfg>(
     return talc_common::store::<Regs, C>(f, v, w, k, op, funcs, module, entry);
     // regs.put_reg(i.rd() as u8, v);
 }
-pub fn reg_op<C: Cfg>(i: &RType, f: &mut FunctionBody, regs: &mut Regs, k: Block, op: Operator) {
+pub fn reg_op<const CSRS: usize, C: Cfg>(
+    i: &RType,
+    f: &mut FunctionBody,
+    regs: &mut Regs<CSRS>,
+    k: Block,
+    op: Operator,
+) {
     let v = regs.reg::<C>(f, i.rs2() as u8, k);
     let w = regs.reg::<C>(f, i.rs1() as u8, k);
     let v = f.add_op(k, op, &[w, v], &[C::ty()]);
     regs.put_reg(i.rd() as u8, v);
 }
-pub fn reg_op32<C: Cfg>(i: &RType, f: &mut FunctionBody, regs: &mut Regs, k: Block, op: Operator) {
+pub fn reg_op32<const CSRS: usize, C: Cfg>(
+    i: &RType,
+    f: &mut FunctionBody,
+    regs: &mut Regs<CSRS>,
+    k: Block,
+    op: Operator,
+) {
     let v = regs.reg::<C>(f, i.rs2() as u8, k);
     let v = if C::MEMORY64 {
         f.add_op(k, Operator::I32WrapI64, &[v], &[Type::I32])
@@ -334,16 +347,22 @@ pub fn reg_op32<C: Cfg>(i: &RType, f: &mut FunctionBody, regs: &mut Regs, k: Blo
         },
     );
 }
-pub fn shift<C: Cfg>(i: &ShiftType, f: &mut FunctionBody, regs: &mut Regs, k: Block, op: Operator) {
+pub fn shift<const CSRS: usize, C: Cfg>(
+    i: &ShiftType,
+    f: &mut FunctionBody,
+    regs: &mut Regs<CSRS>,
+    k: Block,
+    op: Operator,
+) {
     let v = f.add_op(k, C::const_32(i.shamt()), &[], &[C::ty()]);
     let w = regs.reg::<C>(f, i.rs1() as u8, k);
     let v = f.add_op(k, op, &[w, v], &[C::ty()]);
     regs.put_reg(i.rd() as u8, v);
 }
-pub fn shift32<C: Cfg>(
+pub fn shift32<const CSRS: usize, C: Cfg>(
     i: &ShiftType,
     f: &mut FunctionBody,
-    regs: &mut Regs,
+    regs: &mut Regs<CSRS>,
     k: Block,
     op: Operator,
 ) {
@@ -369,10 +388,10 @@ pub fn shift32<C: Cfg>(
         },
     );
 }
-pub fn br<C: Cfg>(
+pub fn br<const CSRS: usize, C: Cfg>(
     i: &BType,
     f: &mut FunctionBody,
-    regs: &mut Regs,
+    regs: &mut Regs<CSRS>,
     k: Block,
     op: Operator,
     pc: u64,
@@ -415,9 +434,9 @@ pub fn br<C: Cfg>(
         },
     );
 }
-pub struct R5 {}
-impl Arch for R5 {
-    type Regs = Regs;
+pub struct R5<const CSRS: usize = 4096> {}
+impl<const CSRS: usize> Arch for R5<CSRS> {
+    type Regs = Regs<CSRS>;
 
     fn go<C: Cfg, H: Hook<Self::Regs>>(
         f: &mut FunctionBody,
@@ -428,10 +447,10 @@ impl Arch for R5 {
         module: &mut Module,
         hook: &mut H,
     ) -> ArchRes {
-        crate::go::<C, H>(f, entry, code, root_pc, funcs, module, hook)
+        crate::go::<CSRS, C, H>(f, entry, code, root_pc, funcs, module, hook)
     }
 }
-pub fn go<C: Cfg, H: Hook<Regs>>(
+pub fn go<const CSRS: usize, C: Cfg, H: Hook<Regs<CSRS>>>(
     f: &mut FunctionBody,
     entry: Block,
     code: InputRef<'_>,
@@ -440,7 +459,7 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
     module: &mut Module,
     hook: &mut H,
 ) -> ArchRes {
-    // let code = hook.update_code::<C>(code);
+    // let code = hook.update_code::<CSRS,C>(code);
     // let code = code.as_ref();
     let mut w = code
         .code
@@ -450,14 +469,14 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
     let shim = f.add_block();
     let mut v = vec![];
     for i in 0..4 {
-        let mut r = Regs {
+        let mut r: Regs<CSRS> = Regs {
             regs: f.blocks[entry].params[..31]
                 .iter()
                 .map(|a| a.1)
                 .collect::<Vec<_>>()
                 .try_into()
                 .unwrap(),
-            csrs: f.blocks[entry].params[32..(31 + 4096)]
+            csrs: f.blocks[entry].params[32..(31 + CSRS)]
                 .iter()
                 .map(|a| a.1)
                 .collect::<Vec<_>>()
@@ -468,7 +487,7 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
 
         let (idx, a) = w.next().unwrap();
         if let Ok(i) = riscv_decode::decode(a) {
-            k = process::<C, H>(
+            k = process::<CSRS, C, H>(
                 f,
                 &i,
                 &mut r,
@@ -489,7 +508,7 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
         let (k, mut regs) = v[idx - 4].clone();
 
         let k = match riscv_decode::decode(a) {
-            Ok(i) => process::<C, H>(
+            Ok(i) => process::<CSRS, C, H>(
                 f,
                 &i,
                 &mut regs,
@@ -508,10 +527,10 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
         v.push((k, regs));
     }
     let pc = f.add_blockparam(shim, C::ty());
-    let mut regs: [Value; Regs::N] = std::array::from_fn(|i| {
-        let p = f.blocks[f.entry].params[i].0;
-        f.add_blockparam(shim, p)
-    });
+    let mut regs: Regs<CSRS> = Regs {
+        regs: array::from_fn(|_| f.add_blockparam(shim, C::ty())),
+        csrs: array::from_fn(|_| f.add_blockparam(shim, C::ty())),
+    };
     if let Some(u) = &funcs.u_deopt {
         let u = *u;
     }
@@ -536,7 +555,7 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
                 .iter()
                 .map(|(a, _)| BlockTarget {
                     block: *a,
-                    args: regs.iter().cloned().collect(),
+                    args: regs.iter().collect(),
                 })
                 .enumerate()
                 .map(|(i, b)| {
@@ -557,7 +576,7 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
             },
         },
     );
-    let c = Regs::ctx(f, entry).collect::<Vec<_>>();
+    let c = Regs::<CSRS>::ctx(f, entry).collect::<Vec<_>>();
     match &funcs.u_deopt {
         None => {
             f.set_terminator(
@@ -566,7 +585,7 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
                     func: funcs.deopt,
                     args: vec![pc]
                         .into_iter()
-                        .chain(regs.iter().cloned())
+                        .chain(regs.iter())
                         .chain(c.into_iter())
                         .collect(),
                 },
@@ -579,8 +598,8 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
             let new_lr = f.add_op(shim, C::const_64(4), &[], &[C::ty()]);
             let new_lr = f.add_op(shim, cdef!(C => Add), &[pc, new_lr], &[C::ty()]);
             // let mut regs = regs.clone();
-            let old_lr = replace(&mut regs[0], new_lr);
-            regs[31 + 4092] = old_lr;
+            let old_lr = replace(&mut regs.regs[0], new_lr);
+            regs.csrs[0] = old_lr;
 
             f.set_terminator(
                 rb,
@@ -589,7 +608,7 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
                         block: shim,
                         args: vec![new_pc]
                             .into_iter()
-                            .chain(regs.iter().cloned())
+                            .chain(regs.iter())
                             .chain(c.into_iter())
                             .collect(),
                     },
@@ -607,10 +626,10 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
         shim,
     };
 }
-pub fn process<C: Cfg, H: Hook<Regs>>(
+pub fn process<const CSRS: usize, C: Cfg, H: Hook<Regs<CSRS>>>(
     f: &mut FunctionBody,
     i: &Instruction,
-    regs: &mut Regs,
+    regs: &mut Regs<CSRS>,
     k: Block,
     pc: u64,
     shim: Block,
@@ -649,7 +668,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
     match i {
         //2.4.1
         Instruction::Addi(i) => {
-            imm::<C>(
+            imm::<CSRS, C>(
                 i,
                 f,
                 regs,
@@ -665,7 +684,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Andi(i) => {
-            imm::<C>(
+            imm::<CSRS, C>(
                 i,
                 f,
                 regs,
@@ -681,7 +700,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Ori(i) => {
-            imm::<C>(
+            imm::<CSRS, C>(
                 i,
                 f,
                 regs,
@@ -697,7 +716,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Xori(i) => {
-            imm::<C>(
+            imm::<CSRS, C>(
                 i,
                 f,
                 regs,
@@ -713,7 +732,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Slti(i) => {
-            imm::<C>(
+            imm::<CSRS, C>(
                 i,
                 f,
                 regs,
@@ -729,7 +748,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Sltiu(i) => {
-            imm::<C>(
+            imm::<CSRS, C>(
                 i,
                 f,
                 regs,
@@ -745,13 +764,13 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Slli(i) => {
-            shift::<C>(i, f, regs, k, cdef!(C => Shl));
+            shift::<CSRS, C>(i, f, regs, k, cdef!(C => Shl));
         }
         Instruction::Srli(i) => {
-            shift::<C>(i, f, regs, k, cdef!(C => ShrU));
+            shift::<CSRS, C>(i, f, regs, k, cdef!(C => ShrU));
         }
         Instruction::Srai(i) => {
-            shift::<C>(i, f, regs, k, cdef!(C => ShrS));
+            shift::<CSRS, C>(i, f, regs, k, cdef!(C => ShrS));
         }
         Instruction::Lui(i) => {
             regs.put_reg(
@@ -777,7 +796,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         }
         //4.2.1
         Instruction::Addiw(i) => {
-            imm32::<C>(
+            imm32::<CSRS, C>(
                 i,
                 f,
                 regs,
@@ -793,90 +812,90 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         // Instruction::Andiw(i) => {
-        //     imm32::<C>(i, f, regs, k, cdef!(C => And), false, funcs, module);
+        //     imm32::<CSRS,C>(i, f, regs, k, cdef!(C => And), false, funcs, module);
         // }
         // Instruction::Oriw(i) => {
-        //     imm32::<C>(i, f, regs, k, cdef!(C => Or), false, funcs, module);
+        //     imm32::<CSRS,C>(i, f, regs, k, cdef!(C => Or), false, funcs, module);
         // }
         // Instruction::Xoriw(i) => {
-        //     imm32::<C>(i, f, regs, k, cdef!(C => Xor), false, funcs, module);
+        //     imm32::<CSRS,C>(i, f, regs, k, cdef!(C => Xor), false, funcs, module);
         // }
         // Instruction::Sltiw(i) => {
-        //     imm32::<C>(i, f, regs, k, cdef!(C => LtS), false, funcs, module);
+        //     imm32::<CSRS,C>(i, f, regs, k, cdef!(C => LtS), false, funcs, module);
         // }
         // Instruction::Sltiuw(i) => {
-        //     imm32::<C>(i, f, regs, k, cdef!(C => LtU), false, funcs, module);
+        //     imm32::<CSRS,C>(i, f, regs, k, cdef!(C => LtU), false, funcs, module);
         // }
         Instruction::Slliw(i) => {
-            shift32::<C>(i, f, regs, k, Operator::I32Shl);
+            shift32::<CSRS, C>(i, f, regs, k, Operator::I32Shl);
         }
         Instruction::Srliw(i) => {
-            shift32::<C>(i, f, regs, k, Operator::I32ShrU);
+            shift32::<CSRS, C>(i, f, regs, k, Operator::I32ShrU);
         }
         Instruction::Sraiw(i) => {
-            shift32::<C>(i, f, regs, k, Operator::I32ShrS);
+            shift32::<CSRS, C>(i, f, regs, k, Operator::I32ShrS);
         }
         //2.4.2
         Instruction::Add(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => Add));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => Add));
         }
         Instruction::Sub(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => Sub));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => Sub));
         }
         Instruction::And(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => And));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => And));
         }
         Instruction::Or(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => Or));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => Or));
         }
         Instruction::Xor(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => Xor));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => Xor));
         }
         Instruction::Slt(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => LtS));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => LtS));
         }
         Instruction::Sltu(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => LtU));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => LtU));
         }
         Instruction::Sll(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => Shl));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => Shl));
         }
         Instruction::Srl(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => ShrU));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => ShrU));
         }
         Instruction::Sra(i) => {
-            reg_op::<C>(i, f, regs, k, cdef!(C => ShrS));
+            reg_op::<CSRS, C>(i, f, regs, k, cdef!(C => ShrS));
         }
         //4.2.2
         Instruction::Addw(i) => {
-            reg_op32::<C>(i, f, regs, k, Operator::I32Add);
+            reg_op32::<CSRS, C>(i, f, regs, k, Operator::I32Add);
         }
         Instruction::Subw(i) => {
-            reg_op32::<C>(i, f, regs, k, Operator::I32Sub);
+            reg_op32::<CSRS, C>(i, f, regs, k, Operator::I32Sub);
         }
         // Instruction::Andw(i) => {
-        //     reg_op::<C>(i, f, regs, k, cdef!(C => And));
+        //     reg_op::<CSRS,C>(i, f, regs, k, cdef!(C => And));
         // }
         // Instruction::Orw(i) => {
-        //     reg_op::<C>(i, f, regs, k, cdef!(C => Or));
+        //     reg_op::<CSRS,C>(i, f, regs, k, cdef!(C => Or));
         // }
         // Instruction::Xorw(i) => {
-        //     reg_op::<C>(i, f, regs, k, cdef!(C => Xor));
+        //     reg_op::<CSRS,C>(i, f, regs, k, cdef!(C => Xor));
         // }
         // Instruction::Sltw(i) => {
-        //     reg_op::<C>(i, f, regs, k, cdef!(C => LtS));
+        //     reg_op::<CSRS,C>(i, f, regs, k, cdef!(C => LtS));
         // }
         // Instruction::Sltuw(i) => {
-        //     reg_op::<C>(i, f, regs, k, cdef!(C => LtU));
+        //     reg_op::<CSRS,C>(i, f, regs, k, cdef!(C => LtU));
         // }
         Instruction::Sllw(i) => {
-            reg_op32::<C>(i, f, regs, k, Operator::I32Shl);
+            reg_op32::<CSRS, C>(i, f, regs, k, Operator::I32Shl);
         }
         Instruction::Srlw(i) => {
-            reg_op32::<C>(i, f, regs, k, Operator::I32ShrU);
+            reg_op32::<CSRS, C>(i, f, regs, k, Operator::I32ShrU);
         }
         Instruction::Sraw(i) => {
-            reg_op32::<C>(i, f, regs, k, Operator::I32ShrS);
+            reg_op32::<CSRS, C>(i, f, regs, k, Operator::I32ShrS);
         }
 
         //2.5.1
@@ -909,8 +928,12 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             let a = f.add_op(k, C::const_32(a), &[], &[C::ty()]);
             let mut base = regs.reg::<C>(f, j.rs1() as u8, k);
             if let Some(u) = &funcs.u_deopt {
-                if u.wrapping_sub(root_pc) <= pc.wrapping_sub(root_pc) && r == 0 && j.rs1() == 1 && funcs.u_deopt_marker.contains(&pc.wrapping_sub(*u)){
-                    base = regs.csrs[4092];
+                if u.wrapping_sub(root_pc) <= pc.wrapping_sub(root_pc)
+                    && r == 0
+                    && j.rs1() == 1
+                    && funcs.u_deopt_marker.contains(&pc.wrapping_sub(*u))
+                {
+                    regs.regs[0] = regs.csrs[0];
                 }
             }
             regs.put_reg(r as u8, f.add_op(k, C::const_64(pc + 4), &[], &[C::ty()]));
@@ -931,27 +954,27 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         }
         //2.5.2
         Instruction::Beq(b) => {
-            br::<C>(b, f, regs, k, cdef!(C => Eq), pc, shim);
+            br::<CSRS, C>(b, f, regs, k, cdef!(C => Eq), pc, shim);
         }
         Instruction::Bne(b) => {
-            br::<C>(b, f, regs, k, cdef!(C => Ne), pc, shim);
+            br::<CSRS, C>(b, f, regs, k, cdef!(C => Ne), pc, shim);
         }
         Instruction::Blt(b) => {
-            br::<C>(b, f, regs, k, cdef!(C => LtS), pc, shim);
+            br::<CSRS, C>(b, f, regs, k, cdef!(C => LtS), pc, shim);
         }
         Instruction::Bltu(b) => {
-            br::<C>(b, f, regs, k, cdef!(C => LtU), pc, shim);
+            br::<CSRS, C>(b, f, regs, k, cdef!(C => LtU), pc, shim);
         }
         Instruction::Bge(b) => {
-            br::<C>(b, f, regs, k, cdef!(C => GeS), pc, shim);
+            br::<CSRS, C>(b, f, regs, k, cdef!(C => GeS), pc, shim);
         }
         Instruction::Bgeu(b) => {
-            br::<C>(b, f, regs, k, cdef!(C => GeU), pc, shim);
+            br::<CSRS, C>(b, f, regs, k, cdef!(C => GeU), pc, shim);
         }
         //2.6
         //Loads
         Instruction::Lb(l) => {
-            k = imm::<C>(
+            k = imm::<CSRS, C>(
                 l,
                 f,
                 regs,
@@ -971,7 +994,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Lbu(l) => {
-            k = imm::<C>(
+            k = imm::<CSRS, C>(
                 l,
                 f,
                 regs,
@@ -992,7 +1015,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         }
         Instruction::Lh(l) => {
             k =
-                imm::<C>(
+                imm::<CSRS, C>(
                     l,
                     f,
                     regs,
@@ -1015,7 +1038,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
                 );
         }
         Instruction::Lhu(l) => {
-            k = imm::<C>(
+            k = imm::<CSRS, C>(
                 l,
                 f,
                 regs,
@@ -1036,7 +1059,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         }
         Instruction::Lw(l) => {
             k =
-                imm::<C>(
+                imm::<CSRS, C>(
                     l,
                     f,
                     regs,
@@ -1072,7 +1095,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         }
         //4.3
         Instruction::Lwu(l) => {
-            k = imm::<C>(
+            k = imm::<CSRS, C>(
                 l,
                 f,
                 regs,
@@ -1104,7 +1127,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Ld(l) => {
-            k = imm::<C>(
+            k = imm::<CSRS, C>(
                 l,
                 f,
                 regs,
@@ -1137,7 +1160,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         }
         //Stores
         Instruction::Sb(s) => {
-            store::<C>(
+            store::<CSRS, C>(
                 s,
                 f,
                 regs,
@@ -1155,7 +1178,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Sh(s) => {
-            store::<C>(
+            store::<CSRS, C>(
                 s,
                 f,
                 regs,
@@ -1173,7 +1196,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Sw(s) => {
-            store::<C>(
+            store::<CSRS, C>(
                 s,
                 f,
                 regs,
@@ -1202,7 +1225,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         }
         //4.3
         Instruction::Sd(s) => {
-            store::<C>(
+            store::<CSRS, C>(
                 s,
                 f,
                 regs,
@@ -1236,7 +1259,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         }
         //2.8
         Instruction::Ecall => {
-            let ctx = Regs::ctx(f, entry).collect::<Vec<_>>();
+            let ctx = Regs::<CSRS>::ctx(f, entry).collect::<Vec<_>>();
             let ecall_params = regs
                 .regs
                 .iter()
