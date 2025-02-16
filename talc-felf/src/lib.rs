@@ -1,4 +1,4 @@
-use talc_common::{bitvec::vec::BitVec, Arch, Cfg, Funcs, Hook, InputRef, TRegs};
+use talc_common::{bitvec::vec::BitVec, Arch, Cfg, Funcs, Hook, InputRef, Perms, TRegs};
 use typenum::Same;
 use waffle::{Block, FunctionBody, Module};
 pub trait ToFelf {
@@ -32,12 +32,15 @@ pub trait Felf: Arch {
         let v = Self::go::<C, H>(
             f,
             entry,
-            InputRef {
+            InputRef::new(
                 code,
-                r: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
-                w: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
-                x: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
-            },
+                Perms {
+                    r: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                    w: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                    x: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                    nj: code.iter().map(|_| false).collect::<BitVec>().as_ref(),
+                },
+            )?,
             base,
             funcs,
             module,
@@ -62,24 +65,31 @@ pub trait Felf: Arch {
         let v = Self::go::<C, H>(
             f,
             entry,
-            InputRef {
+            InputRef::new(
                 code,
-                r: perms
-                    .iter()
-                    .map(|a| a & 0x1 != 0)
-                    .collect::<BitVec>()
-                    .as_ref(),
-                w: perms
-                    .iter()
-                    .map(|a| a & 0x2 != 0)
-                    .collect::<BitVec>()
-                    .as_ref(),
-                x: perms
-                    .iter()
-                    .map(|a| a & 0x4 != 0)
-                    .collect::<BitVec>()
-                    .as_ref(),
-            },
+                Perms {
+                    r: perms
+                        .iter()
+                        .map(|a| a & 0x1 != 0)
+                        .collect::<BitVec>()
+                        .as_ref(),
+                    w: perms
+                        .iter()
+                        .map(|a| a & 0x2 != 0)
+                        .collect::<BitVec>()
+                        .as_ref(),
+                    x: perms
+                        .iter()
+                        .map(|a| a & 0x4 != 0)
+                        .collect::<BitVec>()
+                        .as_ref(),
+                    nj: perms
+                        .iter()
+                        .map(|a| a & 0x8 != 0)
+                        .collect::<BitVec>()
+                        .as_ref(),
+                },
+            )?,
             base,
             funcs,
             module,
@@ -106,12 +116,15 @@ pub trait FelfFuncs: Same<Output = Funcs> + Sized {
         return Some(Funcs::init::<R, C>(
             //SAFETY: same type
             unsafe { std::mem::transmute(self) },
-            InputRef {
+            InputRef::new(
                 code,
-                r: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
-                w: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
-                x: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
-            },
+                Perms {
+                    r: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                    w: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                    x: code.iter().map(|_| true).collect::<BitVec>().as_ref(),
+                    nj: code.iter().map(|_| false).collect::<BitVec>().as_ref(),
+                },
+            )?,
             base,
             f,
             k,
@@ -136,24 +149,31 @@ pub trait FelfFuncs: Same<Output = Funcs> + Sized {
         return Some(Funcs::init::<R, C>(
             //SAFETY: same type
             unsafe { std::mem::transmute(self) },
-            InputRef {
+            InputRef::new(
                 code,
-                r: perms
-                    .iter()
-                    .map(|a| a & 0x1 != 0)
-                    .collect::<BitVec>()
-                    .as_ref(),
-                w: perms
-                    .iter()
-                    .map(|a| a & 0x2 != 0)
-                    .collect::<BitVec>()
-                    .as_ref(),
-                x: perms
-                    .iter()
-                    .map(|a| a & 0x4 != 0)
-                    .collect::<BitVec>()
-                    .as_ref(),
-            },
+                Perms {
+                    r: perms
+                        .iter()
+                        .map(|a| a & 0x1 != 0)
+                        .collect::<BitVec>()
+                        .as_ref(),
+                    w: perms
+                        .iter()
+                        .map(|a| a & 0x2 != 0)
+                        .collect::<BitVec>()
+                        .as_ref(),
+                    x: perms
+                        .iter()
+                        .map(|a| a & 0x4 != 0)
+                        .collect::<BitVec>()
+                        .as_ref(),
+                    nj: perms
+                        .iter()
+                        .map(|a| a & 0x8 != 0)
+                        .collect::<BitVec>()
+                        .as_ref(),
+                },
+            )?,
             base,
             f,
             k,

@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, mem::replace};
+use std::{
+    collections::BTreeMap,
+    mem::{replace, swap},
+};
 
 use riscv_decode::{
     types::{BType, IType, RType, SType, ShiftType},
@@ -68,8 +71,9 @@ pub fn imm<C: Cfg>(
 ) -> Block {
     let w = regs.reg::<C>(f, i.rs1() as u8, k);
     if load {
-        let (n, v) =
-            talc_common::load::<Regs, C>(w, f, regs, k, op, funcs, module, entry, code, root_pc,bits);
+        let (n, v) = talc_common::load::<Regs, C>(
+            w, f, regs, k, op, funcs, module, entry, code, root_pc, bits,
+        );
         regs.put_reg(i.rd() as u8, v);
         return n;
     }
@@ -179,8 +183,9 @@ pub fn imm32<C: Cfg>(
 ) -> Block {
     let w = regs.reg::<C>(f, i.rs1() as u8, k);
     if load {
-        let (n, v) =
-            talc_common::load32::<Regs, C>(w, f, regs, k, op, funcs, module, entry, code, root_pc, bits);
+        let (n, v) = talc_common::load32::<Regs, C>(
+            w, f, regs, k, op, funcs, module, entry, code, root_pc, bits,
+        );
         regs.put_reg(i.rd() as u8, v);
         return n;
     }
@@ -503,10 +508,13 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
         v.push((k, regs));
     }
     let pc = f.add_blockparam(shim, C::ty());
-    let regs: [Value; Regs::N] = std::array::from_fn(|i| {
+    let mut regs: [Value; Regs::N] = std::array::from_fn(|i| {
         let p = f.blocks[f.entry].params[i].0;
         f.add_blockparam(shim, p)
     });
+    if let Some(u) = &funcs.u_deopt {
+        let u = *u;
+    }
     let inv_root = 0u64.wrapping_sub(root_pc);
     let pc_shifted = f.add_op(shim, C::const_64(inv_root), &[], &[C::ty()]);
     let pc_shifted = f.add_op(
@@ -550,17 +558,45 @@ pub fn go<C: Cfg, H: Hook<Regs>>(
         },
     );
     let c = Regs::ctx(f, entry).collect::<Vec<_>>();
-    f.set_terminator(
-        rb,
-        Terminator::ReturnCall {
-            func: funcs.deopt,
-            args: vec![pc]
-                .into_iter()
-                .chain(regs.iter().cloned())
-                .chain(c.into_iter())
-                .collect(),
-        },
-    );
+    match &funcs.u_deopt {
+        None => {
+            f.set_terminator(
+                rb,
+                Terminator::ReturnCall {
+                    func: funcs.deopt,
+                    args: vec![pc]
+                        .into_iter()
+                        .chain(regs.iter().cloned())
+                        .chain(c.into_iter())
+                        .collect(),
+                },
+            );
+        }
+        Some(u) => {
+            let u = *u;
+            let new_pc = f.add_op(shim, C::const_64(u), &[], &[C::ty()]);
+            // let u = u.wrapping_add(4);
+            let new_lr = f.add_op(shim, C::const_64(4), &[], &[C::ty()]);
+            let new_lr = f.add_op(shim, cdef!(C => Add), &[pc, new_lr], &[C::ty()]);
+            // let mut regs = regs.clone();
+            let old_lr = replace(&mut regs[0], new_lr);
+            regs[31 + 4092] = old_lr;
+
+            f.set_terminator(
+                rb,
+                Terminator::Br {
+                    target: BlockTarget {
+                        block: shim,
+                        args: vec![new_pc]
+                            .into_iter()
+                            .chain(regs.iter().cloned())
+                            .chain(c.into_iter())
+                            .collect(),
+                    },
+                },
+            );
+        }
+    }
     return ArchRes {
         insts: v
             .into_iter()
@@ -597,6 +633,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
     if f.blocks[k].terminator == Terminator::None {
         f.set_terminator(k, waffle::Terminator::Br { target: t });
     }
+
     // return new;
     let mut k = new;
     k = hook.hook::<C>(
@@ -848,6 +885,7 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             let a = a as i32 as i64;
             let a = a + (pc as i64);
             let r = j.rd();
+
             regs.put_reg(r as u8, f.add_op(k, C::const_64(pc + 4), &[], &[C::ty()]));
             let a = f.add_op(k, C::const_64(a as u64), &[], &[C::ty()]);
             f.set_terminator(
@@ -867,8 +905,14 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
         Instruction::Jalr(j) => {
             let a = j.imm();
             let r = j.rd();
+
             let a = f.add_op(k, C::const_32(a), &[], &[C::ty()]);
-            let base = regs.reg::<C>(f, j.rs1() as u8, k);
+            let mut base = regs.reg::<C>(f, j.rs1() as u8, k);
+            if let Some(u) = &funcs.u_deopt {
+                if u.wrapping_sub(root_pc) <= pc.wrapping_sub(root_pc) && r == 0 && j.rs1() == 1 && funcs.u_deopt_marker.contains(&pc.wrapping_sub(*u)){
+                    base = regs.csrs[4092];
+                }
+            }
             regs.put_reg(r as u8, f.add_op(k, C::const_64(pc + 4), &[], &[C::ty()]));
             let a = f.add_op(k, cdef!(C => Add), &[base, a], &[C::ty()]);
             f.set_terminator(
@@ -947,28 +991,28 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Lh(l) => {
-            k = imm::<C>(
-                l,
-                f,
-                regs,
-                k,
-                cdef!(C => Load16S{memory: MemoryArg {
-                    align: 0,
-                    offset: l.imm().into(),
-                    memory: funcs.memory,
-                }}),
-                true,
-                funcs,
-                module,
-                entry,
-                code,
-                root_pc,
-                |i| {
-                    C::const_64(
-                        u16::from_le_bytes(code.code[i..][..2].try_into().unwrap()) as i16 as i64 as u64,
-                    )
-                },
-            );
+            k =
+                imm::<C>(
+                    l,
+                    f,
+                    regs,
+                    k,
+                    cdef!(C => Load16S{memory: MemoryArg {
+                        align: 0,
+                        offset: l.imm().into(),
+                        memory: funcs.memory,
+                    }}),
+                    true,
+                    funcs,
+                    module,
+                    entry,
+                    code,
+                    root_pc,
+                    |i| {
+                        C::const_64(u16::from_le_bytes(code.code[i..][..2].try_into().unwrap())
+                            as i16 as i64 as u64)
+                    },
+                );
         }
         Instruction::Lhu(l) => {
             k = imm::<C>(
@@ -991,40 +1035,40 @@ pub fn process<C: Cfg, H: Hook<Regs>>(
             );
         }
         Instruction::Lw(l) => {
-            k = imm::<C>(
-                l,
-                f,
-                regs,
-                k,
-                if C::MEMORY64 {
-                    Operator::I64Load32S {
-                        memory: MemoryArg {
-                            align: 0,
-                            offset: l.imm().into(),
-                            memory: funcs.memory,
-                        },
-                    }
-                } else {
-                    Operator::I32Load {
-                        memory: MemoryArg {
-                            align: 0,
-                            offset: l.imm().into(),
-                            memory: funcs.memory,
-                        },
-                    }
-                },
-                true,
-                funcs,
-                module,
-                entry,
-                code,
-                root_pc,
-                |i| {
-                    C::const_64(
-                        u32::from_le_bytes(code.code[i..][..4].try_into().unwrap()) as i32 as i64 as u64,
-                    )
-                },
-            );
+            k =
+                imm::<C>(
+                    l,
+                    f,
+                    regs,
+                    k,
+                    if C::MEMORY64 {
+                        Operator::I64Load32S {
+                            memory: MemoryArg {
+                                align: 0,
+                                offset: l.imm().into(),
+                                memory: funcs.memory,
+                            },
+                        }
+                    } else {
+                        Operator::I32Load {
+                            memory: MemoryArg {
+                                align: 0,
+                                offset: l.imm().into(),
+                                memory: funcs.memory,
+                            },
+                        }
+                    },
+                    true,
+                    funcs,
+                    module,
+                    entry,
+                    code,
+                    root_pc,
+                    |i| {
+                        C::const_64(u32::from_le_bytes(code.code[i..][..4].try_into().unwrap())
+                            as i32 as i64 as u64)
+                    },
+                );
         }
         //4.3
         Instruction::Lwu(l) => {

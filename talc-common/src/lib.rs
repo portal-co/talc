@@ -1,57 +1,21 @@
-use std::{borrow::Cow, collections::BTreeMap, iter::once, sync::OnceLock};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+    iter::once,
+    sync::OnceLock,
+};
 
 use bitvec::{slice::BitSlice, vec::BitVec};
 use typenum::{Bit, Unsigned};
 pub use waffle::Operator;
 pub extern crate bitvec;
 pub extern crate paste;
+pub use portal_pc_asm_common::types::{Input, InputRef, Perms};
 use waffle::{
     Block, BlockTarget, Func, FunctionBody, Memory, MemoryArg, MemoryData, MemorySegment, Module,
     SignatureData, Terminator, Type, Value,
 };
 use waffle_ast::{results_ref_2, Builder, Expr};
-#[derive(Clone, Copy)]
-pub struct InputRef<'a> {
-    pub code: &'a [u8],
-    pub r: &'a BitSlice,
-    pub w: &'a BitSlice,
-    pub x: &'a BitSlice,
-}
-#[derive(Clone)]
-pub struct Input {
-    pub code: Vec<u8>,
-    pub r: BitVec,
-    pub w: BitVec,
-    pub x: BitVec,
-}
-impl Input {
-    pub fn borrow<'a>(&'a self) -> InputRef<'a> {
-        InputRef {
-            code: &self.code,
-            r: &self.r,
-            w: &self.w,
-            x: &self.x,
-        }
-    }
-    pub fn expand(&mut self, new_len: usize) {
-        while self.code.len() < new_len {
-            self.code.push(0);
-            self.r.push(false);
-            self.w.push(false);
-            self.x.push(false);
-        }
-    }
-}
-impl<'a> InputRef<'a> {
-    pub fn to_owned(self) -> Input {
-        Input {
-            code: self.code.to_owned(),
-            r: self.r.to_owned(),
-            w: self.w.to_owned(),
-            x: self.x.to_owned(),
-        }
-    }
-}
 pub trait Hook<R: TRegs> {
     fn hook<C: Cfg>(
         &mut self,
@@ -441,12 +405,16 @@ pub fn load32<Regs: TRegs, C: Cfg>(
     // regs.put_reg(i.rd() as u8, v);
     return (n, v);
 }
+#[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct Funcs {
     pub memory: Memory,
     pub ecall: Func,
     pub resolve: Func,
     pub finalize: Func,
     pub deopt: Func,
+    pub u_deopt: Option<u64>,
+    pub u_deopt_marker: BTreeSet<u64>,
     pub can_multi_memory: bool,
     pub code_mem: OnceLock<Memory>,
 }
