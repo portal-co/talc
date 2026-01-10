@@ -1,13 +1,14 @@
 # talc
 
 ## Description
-Project talc
+A workspace (`talc`) for binary lifting/translation (`talc-riscv`, `talc-x86`, `talc-aarch64`). Likely "Translation/Analysis Layer for Code".
 
 ## Goals
-- [ ] Add project goals
+- [ ] Lift binaries to IR
+- [ ] Support multiple architectures
 
 ## Progress
-- [ ] Initial setup
+- [ ] Workspace setup with arch crates and SSA integration
 
 ---
 *AI assisted*
